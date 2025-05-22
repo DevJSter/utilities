@@ -1,0 +1,16 @@
+{
+  "dependencies": {
+    "base-64": "^1.0.0",
+    "crypto": "^1.0.1",
+    "crypto-js": "^4.2.0",
+    "eccrypto": "^1.1.6",
+    "ethers": "^6.14.1",
+    "react-native-get-random-values": "^1.11.0",
+    "react-native-quick-crypto": "^0.7.13"
+  },
+  "devDependencies": {
+    "@types/base-64": "^1.0.2",
+    "@types/crypto-js": "^4.2.2",
+    "@types/jest": "^29.5.14"
+  }
+}
