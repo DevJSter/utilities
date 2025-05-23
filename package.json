@@ -1,16 +1,17 @@
 {
-   "name": "coinmarketcap-api-client",
+  "name": "coinmarketcap-api-client",
   "version": "1.0.0",
   "description": "TypeScript client for CoinMarketCap API",
   "scripts": {
-  "build": "tsc",
-  "start": "node dist/cmc.js",
-  "dev": "node --loader ts-node/esm cmc.ts",
-  "watch": "tsc -w"
-},
+    "build": "tsc",
+    "start": "node dist/cmc.js",
+    "dev": "node --loader ts-node/esm cmc.ts",
+    "watch": "tsc -w"
+  },
   "dependencies": {
     "axios": "^1.9.0",
     "base-64": "^1.0.0",
+    "cheerio": "^1.0.0",
     "crypto": "^1.0.1",
     "crypto-js": "^4.2.0",
     "eccrypto": "^1.1.6",
@@ -20,9 +21,9 @@
   },
   "devDependencies": {
     "@types/base-64": "^1.0.2",
-    "@types/node": "^20.8.0",
     "@types/crypto-js": "^4.2.2",
     "@types/jest": "^29.5.14",
+    "@types/node": "^20.8.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3"
   }
