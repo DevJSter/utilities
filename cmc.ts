@@ -218,7 +218,8 @@ class CoinMarketCapAPI {
 // Usage example
 async function main() {
   // Get your API key from https://coinmarketcap.com/api/
-  const apiKey = process.env.CMC_API_KEY || 'YOUR_API_KEY_HERE';
+  // Replace 'YOUR_API_KEY_HERE' with your actual API key
+  const apiKey = 'YOUR_API_KEY_HERE';
   const cmc = new CoinMarketCapAPI(apiKey);
 
   try {
