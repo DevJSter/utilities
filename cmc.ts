@@ -233,7 +233,7 @@ class CoinMarketCapFreeAPI {
 // Usage examples with free tier
 async function exampleUsage() {
   // Replace with your actual API key from coinmarketcap.com/api
-  const API_KEY = 'YOUR_FREE_API_KEY_HERE';
+  const API_KEY = '4678cde0-6535-4038-850c-9da1fab2e8c3';
   const cmc = new CoinMarketCapFreeAPI(API_KEY);
 
   try {
