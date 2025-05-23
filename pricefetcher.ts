@@ -1,157 +1,232 @@
- import axios from 'axios';
+import axios from 'axios';
+import { writeFileSync, readFileSync, existsSync } from 'fs';
 
-// Simple price fetcher without complex scraping
-class SimplePriceFetcher {
-  private headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-  };
+interface PriceEntry {
+  timestamp: number;
+  date: string;
+  symbol: string;
+  price: number;
+  change24h: number | null;
+  volume: number;
+  marketCap: number;
+}
 
-  // Alternative: Use CoinGecko (no API key required for basic usage)
-  async getPricesFromCoinGecko(symbols: string[]) {
+class SimplePriceStorage {
+  private fileName: string;
+
+  constructor(fileName: string = 'prices.json') {
+    this.fileName = fileName;
+  }
+
+  // Load existing prices from file
+  private loadPrices(): PriceEntry[] {
     try {
-      const ids = symbols.join(',').toLowerCase();
-      const response = await axios.get(
-        `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true`,
-        { headers: this.headers }
-      );
-      
-      return response.data;
+      if (existsSync(this.fileName)) {
+        const data = readFileSync(this.fileName, 'utf8');
+        return JSON.parse(data);
+      }
     } catch (error) {
-      console.error('CoinGecko error:', error);
-      return {};
+      console.log('📄 Creating new price file...');
+    }
+    return [];
+  }
+
+  // Save prices to file
+  private savePrices(prices: PriceEntry[]): void {
+    try {
+      writeFileSync(this.fileName, JSON.stringify(prices, null, 2));
+      console.log(`💾 Saved ${prices.length} entries to ${this.fileName}`);
+    } catch (error) {
+      console.error('❌ Error saving prices:', error);
     }
   }
 
-  // Get top coins from CoinGecko
-  async getTopCoinsFromCoinGecko(limit: number = 50) {
+  // Fetch prices from CoinGecko and append to file
+  async fetchAndStore(coinIds: string[]): Promise<void> {
     try {
-      const response = await axios.get(
-        `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=${limit}&page=1&sparkline=false&price_change_percentage=1h,24h,7d`,
-        { headers: this.headers }
-      );
-      
-      return response.data.map((coin: any) => ({
-        rank: coin.market_cap_rank,
-        id: coin.id,
-        symbol: coin.symbol.toUpperCase(),
-        name: coin.name,
-        price: coin.current_price,
-        change1h: coin.price_change_percentage_1h_in_currency,
-        change24h: coin.price_change_percentage_24h,
-        change7d: coin.price_change_percentage_7d_in_currency,
-        volume24h: coin.total_volume,
-        marketCap: coin.market_cap,
-        image: coin.image
-      }));
-    } catch (error) {
-      console.error('Error fetching from CoinGecko:', error);
-      return [];
-    }
-  }
+      console.log(`🔍 Fetching prices for: ${coinIds.join(', ')}`);
 
-  // Simple CoinMarketCap mobile API (sometimes works without auth)
-  async getCMCMobileData() {
-    try {
-      const response = await axios.get(
-        'https://coinmarketcap.com/api/v2/cryptocurrency/quotes/latest?CMC_PRO_API_KEY=UNIFIED-CRYPTOAPI-DEFAULT-API-KEY',
-        { 
-          headers: this.headers,
-          timeout: 5000 
+      const response = await axios.get('https://api.coingecko.com/api/v3/simple/price', {
+        params: {
+          ids: coinIds.join(','),
+          vs_currencies: 'usd',
+          include_24hr_change: true,
+          include_24hr_vol: true,
+          include_market_cap: true
         }
-      );
+      });
+
+      const currentTime = Date.now();
+      const currentDate = new Date().toISOString();
+
+      // Load existing prices
+      const existingPrices = this.loadPrices();
+
+      // Create new entries
+      const newEntries: PriceEntry[] = [];
       
-      return response.data;
+      for (const [coinId, data] of Object.entries(response.data)) {
+        const coinData = data as any;
+        newEntries.push({
+          timestamp: currentTime,
+          date: currentDate,
+          symbol: coinId.toUpperCase(),
+          price: coinData.usd || 0,
+          change24h: coinData.usd_24h_change || null,
+          volume: coinData.usd_24h_vol || 0,
+          marketCap: coinData.usd_market_cap || 0
+        });
+      }
+
+      // Append new entries to existing ones
+      const allPrices = [...existingPrices, ...newEntries];
+
+      // Save back to file
+      this.savePrices(allPrices);
+
+      // Display what we just added
+      console.log('\n📊 NEW ENTRIES ADDED:');
+      newEntries.forEach(entry => {
+        const changeColor = (entry.change24h || 0) >= 0 ? '🟢' : '🔴';
+        console.log(`${changeColor} ${entry.symbol}: $${entry.price.toFixed(4)} (${entry.change24h?.toFixed(2) || 'N/A'}%)`);
+      });
+
+      console.log(`\n📈 Total entries in file: ${allPrices.length}`);
+
     } catch (error) {
-      console.log('CMC mobile API failed, using alternative...');
-      return null;
+      console.error('❌ Error fetching prices:', error);
     }
   }
 
-  // Display formatted results
-  displayResults(coins: any[]) {
-    console.log('\n🚀 CRYPTOCURRENCY PRICES\n');
-    console.log('Rank | Symbol | Name | Price | 1h % | 24h % | 7d % | Volume | Market Cap');
-    console.log(''.padEnd(95, '-'));
+  // Get the latest price for each symbol
+  getLatestPrices(): { [symbol: string]: PriceEntry } {
+    const prices = this.loadPrices();
+    const latest: { [symbol: string]: PriceEntry } = {};
 
-    coins.forEach(coin => {
-      const price = coin.price ? `$${coin.price.toFixed(4)}` : 'N/A';
-      const change1h = coin.change1h ? `${coin.change1h.toFixed(2)}%` : 'N/A';
-      const change24h = coin.change24h ? `${coin.change24h.toFixed(2)}%` : 'N/A';
-      const change7d = coin.change7d ? `${coin.change7d.toFixed(2)}%` : 'N/A';
-      const volume = coin.volume24h ? `$${(coin.volume24h / 1e6).toFixed(1)}M` : 'N/A';
-      const marketCap = coin.marketCap ? `$${(coin.marketCap / 1e9).toFixed(2)}B` : 'N/A';
+    prices.forEach(price => {
+      if (!latest[price.symbol] || price.timestamp > latest[price.symbol].timestamp) {
+        latest[price.symbol] = price;
+      }
+    });
 
-      console.log(
-        `${coin.rank?.toString().padStart(4) || 'N/A'.padStart(4)} | ` +
-        `${coin.symbol.padEnd(6)} | ` +
-        `${coin.name.slice(0, 12).padEnd(12)} | ` +
-        `${price.padStart(10)} | ` +
-        `${change1h.padStart(6)} | ` +
-        `${change24h.padStart(6)} | ` +
-        `${change7d.padStart(6)} | ` +
-        `${volume.padStart(8)} | ` +
-        `${marketCap.padStart(10)}`
-      );
+    return latest;
+  }
+
+  // Get price history for a specific symbol
+  getPriceHistory(symbol: string, limit: number = 10): PriceEntry[] {
+    const prices = this.loadPrices();
+    return prices
+      .filter(p => p.symbol.toUpperCase() === symbol.toUpperCase())
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, limit);
+  }
+
+  // Display file statistics
+  showStats(): void {
+    const prices = this.loadPrices();
+    
+    if (prices.length === 0) {
+      console.log('📄 No price data found');
+      return;
+    }
+
+    const symbols = [...new Set(prices.map(p => p.symbol))];
+    const latest = Math.max(...prices.map(p => p.timestamp));
+    const oldest = Math.min(...prices.map(p => p.timestamp));
+
+    console.log('\n📊 PRICE FILE STATISTICS');
+    console.log('========================');
+    console.log(`File: ${this.fileName}`);
+    console.log(`Total entries: ${prices.length}`);
+    console.log(`Symbols tracked: ${symbols.length} (${symbols.join(', ')})`);
+    console.log(`Date range: ${new Date(oldest).toLocaleDateString()} to ${new Date(latest).toLocaleDateString()}`);
+    
+    // Count per symbol
+    const counts: { [key: string]: number } = {};
+    prices.forEach(p => counts[p.symbol] = (counts[p.symbol] || 0) + 1);
+    
+    console.log('\nEntries per symbol:');
+    Object.entries(counts).forEach(([symbol, count]) => {
+      console.log(`  ${symbol}: ${count}`);
     });
   }
-
-  // Monitor specific coins
-  async monitorCoins(symbols: string[]) {
-    console.log(`📊 Monitoring: ${symbols.join(', ')}\n`);
-    
-    // Try CoinGecko first
-    const coinGeckoIds = symbols.map(s => s.toLowerCase());
-    const prices = await this.getPricesFromCoinGecko(coinGeckoIds);
-    
-    for (const [id, data] of Object.entries(prices)) {
-      const priceData = data as any;
-      console.log(`${id.toUpperCase()}:`);
-      console.log(`  💰 Price: $${priceData.usd}`);
-      console.log(`  📈 24h Change: ${priceData.usd_24h_change?.toFixed(2)}%`);
-      console.log(`  💹 24h Volume: $${(priceData.usd_24h_vol / 1e6)?.toFixed(2)}M`);
-      console.log('');
-    }
-  }
 }
 
-// Usage examples
+// Quick usage functions
+async function logPricesNow(coins: string[] = ['bitcoin', 'ethereum', 'cardano']) {
+  const storage = new SimplePriceStorage();
+  await storage.fetchAndStore(coins);
+}
+
+async function startPriceLogging(coins: string[], intervalMinutes: number = 5) {
+  const storage = new SimplePriceStorage();
+  
+  console.log(`🚀 Starting automatic price logging...`);
+  console.log(`⏰ Interval: ${intervalMinutes} minutes`);
+  console.log(`💰 Coins: ${coins.join(', ')}\n`);
+
+  // Log immediately
+  await storage.fetchAndStore(coins);
+
+  // Set up recurring logging
+  setInterval(async () => {
+    await storage.fetchAndStore(coins);
+  }, intervalMinutes * 60 * 1000);
+}
+
+// Example usage
 async function main() {
-  const fetcher = new SimplePriceFetcher();
+  const storage = new SimplePriceStorage('my-crypto-prices.json');
+
+  // Popular cryptocurrencies (use CoinGecko IDs)
+  const coins = [
+    'bitcoin',
+    'ethereum', 
+    'cardano',
+    'polkadot',
+    'chainlink',
+    'solana',
+    'avalanche-2',
+    'polygon',
+    'uniswap'
+  ];
 
   try {
-    console.log('🔄 Fetching cryptocurrency data...');
+    // Fetch and store current prices
+    await storage.fetchAndStore(coins);
 
-    // Get top 20 coins from CoinGecko
-    const topCoins = await fetcher.getTopCoinsFromCoinGecko(20);
-    if (topCoins.length > 0) {
-      fetcher.displayResults(topCoins);
-    }
+    // Show what's in the file
+    storage.showStats();
 
-    // Monitor specific coins
-    console.log('\n' + '='.repeat(50));
-    await fetcher.monitorCoins(['bitcoin', 'ethereum', 'cardano', 'polkadot']);
+    // Display latest prices
+    console.log('\n💰 LATEST PRICES:');
+    const latest = storage.getLatestPrices();
+    Object.values(latest).forEach(price => {
+      const time = new Date(price.timestamp).toLocaleTimeString();
+      console.log(`${price.symbol}: $${price.price.toFixed(4)} at ${time}`);
+    });
+
+    // Show price history for Bitcoin
+    console.log('\n₿ BITCOIN PRICE HISTORY (last 5 entries):');
+    const btcHistory = storage.getPriceHistory('BITCOIN', 5);
+    btcHistory.forEach((entry, index) => {
+      const time = new Date(entry.timestamp).toLocaleString();
+      console.log(`${index + 1}. $${entry.price.toFixed(2)} - ${time}`);
+    });
 
   } catch (error) {
-    console.error('Error:', error);
+    console.error('❌ Error:', error);
   }
 }
 
-// Quick price check function
-async function quickPriceCheck(coinIds: string[]) {
-  const fetcher = new SimplePriceFetcher();
-  const prices = await fetcher.getPricesFromCoinGecko(coinIds);
-  
-  console.log('💰 Quick Price Check:');
-  for (const [id, data] of Object.entries(prices)) {
-    const priceData = data as any;
-    console.log(`${id}: $${priceData.usd} (${priceData.usd_24h_change?.toFixed(2)}%)`);
-  }
-  
-  return prices;
-}
+// Export for use in other files
+export { SimplePriceStorage, PriceEntry };
 
-export { SimplePriceFetcher, quickPriceCheck };
-
+// Uncomment to run different examples:
 if (require.main === module) {
+  // Single price fetch
   main();
+  
+  // Continuous logging every 10 minutes
+  // startPriceLogging(['bitcoin', 'ethereum', 'cardano'], 10);
 }
