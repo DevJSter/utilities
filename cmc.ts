@@ -1,368 +1,307 @@
-import axios from 'axios';
-import * as fs from 'fs';
-import * as path from 'path';
+import axios, { AxiosResponse } from 'axios';
 
-// Types for price data
-interface PriceData {
-  timestamp: string;
-  datetime: string;
-  symbol: string;
-  name: string;
+// Types for CoinMarketCap Free API responses
+interface CMCQuote {
   price: number;
-  change1h: number | null;
-  change24h: number | null;
-  change7d: number | null;
-  volume24h: number;
-  marketCap: number;
-  rank?: number;
+  volume_24h: number;
+  volume_change_24h: number;
+  percent_change_1h: number;
+  percent_change_24h: number;
+  percent_change_7d: number;
+  market_cap: number;
+  market_cap_dominance?: number;
+  last_updated: string;
 }
 
-interface StoredPrices {
-  lastUpdated: string;
-  totalEntries: number;
-  symbols: string[];
-  prices: PriceData[];
+interface CMCCryptocurrency {
+  id: number;
+  name: string;
+  symbol: string;
+  slug: string;
+  num_market_pairs: number;
+  date_added: string;
+  max_supply: number | null;
+  circulating_supply: number;
+  total_supply: number;
+  cmc_rank: number;
+  last_updated: string;
+  quote: {
+    [currency: string]: CMCQuote;
+  };
 }
 
-class CryptoPriceLogger {
-  private filePath: string;
-  private apiKey?: string;
-  private useCoingecko: boolean;
+interface CMCResponse {
+  status: {
+    timestamp: string;
+    error_code: number;
+    error_message: string | null;
+    elapsed: number;
+    credit_count: number;
+  };
+  data: CMCCryptocurrency[];
+}
 
-  constructor(filePath: string = './prices.json', apiKey?: string, useCoingecko: boolean = true) {
-    this.filePath = filePath;
+interface CMCGlobalMetrics {
+  active_cryptocurrencies: number;
+  total_cryptocurrencies: number;
+  active_market_pairs: number;
+  active_exchanges: number;
+  btc_dominance: number;
+  eth_dominance: number;
+  quote: {
+    [currency: string]: {
+      total_market_cap: number;
+      total_volume_24h: number;
+      last_updated: string;
+    };
+  };
+}
+
+class CoinMarketCapFreeAPI {
+  private apiKey: string;
+  private baseUrl: string = 'https://pro-api.coinmarketcap.com/v1';
+  private callCount: number = 0;
+  private monthlyLimit: number = 10000;
+
+  constructor(apiKey: string) {
     this.apiKey = apiKey;
-    this.useCoingecko = useCoingecko;
-    
-    // Ensure the directory exists
-    const dir = path.dirname(this.filePath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+  }
+
+  private async makeRequest<T>(endpoint: string, params: Record<string, any> = {}): Promise<T> {
+    if (this.callCount >= this.monthlyLimit) {
+      throw new Error(`Monthly limit of ${this.monthlyLimit} API calls exceeded`);
+    }
+
+    try {
+      const response: AxiosResponse<T> = await axios.get(`${this.baseUrl}${endpoint}`, {
+        headers: {
+          'X-CMC_PRO_API_KEY': this.apiKey,
+          'Accept': 'application/json',
+        },
+        params,
+        timeout: 10000
+      });
+
+      this.callCount++;
+      console.log(`✅ API Call ${this.callCount}/${this.monthlyLimit} - Credits used: ${(response.data as any)?.status?.credit_count || 1}`);
+      
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const errorMsg = error.response?.data?.status?.error_message || error.message;
+        throw new Error(`CoinMarketCap API Error: ${errorMsg}`);
+      }
+      throw error;
     }
   }
 
-  // Read existing price data from file
-  private readPriceData(): StoredPrices {
-    try {
-      if (fs.existsSync(this.filePath)) {
-        const data = fs.readFileSync(this.filePath, 'utf8');
-        return JSON.parse(data);
-      }
-    } catch (error) {
-      console.warn('⚠️ Could not read existing price data:', error);
+  // ✅ FREE: Get latest cryptocurrency listings (top cryptos by market cap)
+  async getLatestListings(
+    start: number = 1,
+    limit: number = 100,
+    convert: string = 'USD'
+  ): Promise<CMCResponse> {
+    if (limit > 5000) limit = 5000; // API max limit
+    
+    return this.makeRequest<CMCResponse>('/cryptocurrency/listings/latest', {
+      start,
+      limit,
+      convert
+    });
+  }
+
+  // ✅ FREE: Get quotes for specific cryptocurrencies
+  async getQuotes(
+    symbols?: string[],
+    ids?: number[],
+    convert: string = 'USD'
+  ): Promise<any> {
+    const params: Record<string, any> = { convert };
+    
+    if (symbols && symbols.length > 0) {
+      params.symbol = symbols.join(',');
+    }
+    if (ids && ids.length > 0) {
+      params.id = ids.join(',');
     }
 
-    // Return default structure if file doesn't exist or is corrupted
+    return this.makeRequest('/cryptocurrency/quotes/latest', params);
+  }
+
+  // ✅ FREE: Get global cryptocurrency market metrics
+  async getGlobalMetrics(convert: string = 'USD'): Promise<{ data: CMCGlobalMetrics }> {
+    return this.makeRequest('/global-metrics/quotes/latest', { convert });
+  }
+
+  // ✅ FREE: Get cryptocurrency metadata
+  async getMetadata(symbols?: string[], ids?: number[]): Promise<any> {
+    const params: Record<string, any> = {};
+    
+    if (symbols && symbols.length > 0) {
+      params.symbol = symbols.join(',');
+    }
+    if (ids && ids.length > 0) {
+      params.id = ids.join(',');
+    }
+
+    return this.makeRequest('/cryptocurrency/info', params);
+  }
+
+  // ✅ FREE: Get fiat currency mapping
+  async getFiatMap(): Promise<any> {
+    return this.makeRequest('/fiat/map');
+  }
+
+  // ✅ FREE: Get cryptocurrency ID mapping
+  async getCryptocurrencyMap(
+    listing_status: 'active' | 'inactive' | 'untracked' = 'active',
+    start: number = 1,
+    limit: number = 5000
+  ): Promise<any> {
+    return this.makeRequest('/cryptocurrency/map', {
+      listing_status,
+      start,
+      limit
+    });
+  }
+
+  // ✅ FREE: Get key info about the API
+  async getKeyInfo(): Promise<any> {
+    return this.makeRequest('/key/info');
+  }
+
+  // Helper: Display current usage
+  getUsageStats(): { callsUsed: number; callsRemaining: number; usagePercentage: number } {
     return {
-      lastUpdated: new Date().toISOString(),
-      totalEntries: 0,
-      symbols: [],
-      prices: []
+      callsUsed: this.callCount,
+      callsRemaining: this.monthlyLimit - this.callCount,
+      usagePercentage: (this.callCount / this.monthlyLimit) * 100
     };
   }
 
-  // Write price data to file
-  private writePriceData(data: StoredPrices): void {
+  // Helper: Format and display cryptocurrency data
+  static formatCryptoData(cryptos: CMCCryptocurrency[], currency: string = 'USD'): void {
+    console.log('\n📊 CRYPTOCURRENCY MARKET DATA\n');
+    console.log('Rank | Symbol | Name | Price | 1h % | 24h % | 7d % | Volume 24h | Market Cap');
+    console.log(''.padEnd(100, '-'));
+
+    cryptos.forEach(crypto => {
+      const quote = crypto.quote[currency];
+      
+      const rank = crypto.cmc_rank.toString().padStart(4);
+      const symbol = crypto.symbol.padEnd(6);
+      const name = crypto.name.slice(0, 15).padEnd(15);
+      const price = `$${quote.price.toLocaleString(undefined, { 
+        minimumFractionDigits: 2, 
+        maximumFractionDigits: quote.price < 1 ? 6 : 2 
+      })}`.padStart(12);
+      const change1h = `${quote.percent_change_1h?.toFixed(2) || 'N/A'}%`.padStart(7);
+      const change24h = `${quote.percent_change_24h?.toFixed(2) || 'N/A'}%`.padStart(7);
+      const change7d = `${quote.percent_change_7d?.toFixed(2) || 'N/A'}%`.padStart(7);
+      const volume = `$${(quote.volume_24h / 1000000).toFixed(2)}M`.padStart(10);
+      const marketCap = `$${(quote.market_cap / 1000000000).toFixed(2)}B`.padStart(12);
+
+      console.log(`${rank} | ${symbol} | ${name} | ${price} | ${change1h} | ${change24h} | ${change7d} | ${volume} | ${marketCap}`);
+    });
+  }
+
+  // Helper: Quick price monitor
+  async quickPriceCheck(symbols: string[]): Promise<void> {
     try {
-      fs.writeFileSync(this.filePath, JSON.stringify(data, null, 2), 'utf8');
-      console.log(`💾 Saved ${data.prices.length} price entries to ${this.filePath}`);
-    } catch (error) {
-      console.error('❌ Error writing price data:', error);
-    }
-  }
-
-  // Fetch prices from CoinGecko (free, no API key needed)
-  async fetchPricesFromCoinGecko(symbols: string[]): Promise<PriceData[]> {
-    try {
-      // Convert symbols to CoinGecko IDs (lowercase)
-      const ids = symbols.map(s => s.toLowerCase()).join(',');
+      const data = await this.getQuotes(symbols);
       
-      const response = await axios.get(
-        `https://api.coingecko.com/api/v3/coins/markets`,
-        {
-          params: {
-            vs_currency: 'usd',
-            ids: ids,
-            order: 'market_cap_desc',
-            per_page: symbols.length,
-            page: 1,
-            sparkline: false,
-            price_change_percentage: '1h,24h,7d'
-          },
-          headers: {
-            'User-Agent': 'CryptoPriceLogger/1.0'
-          },
-          timeout: 10000
-        }
-      );
-
-      const now = new Date();
-      return response.data.map((coin: any) => ({
-        timestamp: now.getTime().toString(),
-        datetime: now.toISOString(),
-        symbol: coin.symbol.toUpperCase(),
-        name: coin.name,
-        price: coin.current_price || 0,
-        change1h: coin.price_change_percentage_1h_in_currency || null,
-        change24h: coin.price_change_percentage_24h || null,
-        change7d: coin.price_change_percentage_7d_in_currency || null,
-        volume24h: coin.total_volume || 0,
-        marketCap: coin.market_cap || 0,
-        rank: coin.market_cap_rank || null
-      }));
-
-    } catch (error) {
-      console.error('❌ Error fetching from CoinGecko:', error);
-      return [];
-    }
-  }
-
-  // Fetch prices from CoinMarketCap (requires API key)
-  async fetchPricesFromCMC(symbols: string[]): Promise<PriceData[]> {
-    if (!this.apiKey) {
-      throw new Error('API key required for CoinMarketCap');
-    }
-
-    try {
-      const response = await axios.get(
-        'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest',
-        {
-          params: {
-            symbol: symbols.join(','),
-            convert: 'USD'
-          },
-          headers: {
-            'X-CMC_PRO_API_KEY': this.apiKey,
-            'Accept': 'application/json'
-          },
-          timeout: 10000
-        }
-      );
-
-      const now = new Date();
-      const priceData: PriceData[] = [];
-
-      for (const [symbol, data] of Object.entries(response.data.data)) {
-        const coin = data as any;
-        const quote = coin.quote.USD;
-
-        priceData.push({
-          timestamp: now.getTime().toString(),
-          datetime: now.toISOString(),
-          symbol: symbol,
-          name: coin.name,
-          price: quote.price || 0,
-          change1h: quote.percent_change_1h || null,
-          change24h: quote.percent_change_24h || null,
-          change7d: quote.percent_change_7d || null,
-          volume24h: quote.volume_24h || 0,
-          marketCap: quote.market_cap || 0,
-          rank: coin.cmc_rank || null
-        });
+      console.log('\n💰 QUICK PRICE CHECK\n');
+      
+      for (const [symbol, tokenData] of Object.entries(data.data)) {
+        const token = tokenData as any;
+        const quote = token.quote.USD;
+        
+        const priceColor = quote.percent_change_24h >= 0 ? '🟢' : '🔴';
+        
+        console.log(`${priceColor} ${token.name} (${token.symbol}):`);
+        console.log(`   Price: $${quote.price.toLocaleString()}`);
+        console.log(`   24h: ${quote.percent_change_24h?.toFixed(2)}%`);
+        console.log(`   Volume: $${(quote.volume_24h / 1e6).toFixed(2)}M`);
+        console.log('');
       }
-
-      return priceData;
-
     } catch (error) {
-      console.error('❌ Error fetching from CoinMarketCap:', error);
-      return [];
+      console.error('❌ Error fetching prices:', error);
     }
-  }
-
-  // Main method to fetch and store prices
-  async logPrices(symbols: string[]): Promise<void> {
-    console.log(`🔍 Fetching prices for: ${symbols.join(', ')}`);
-
-    let newPrices: PriceData[];
-
-    if (this.useCoingecko) {
-      newPrices = await this.fetchPricesFromCoinGecko(symbols);
-    } else {
-      newPrices = await this.fetchPricesFromCMC(symbols);
-    }
-
-    if (newPrices.length === 0) {
-      console.log('⚠️ No price data fetched');
-      return;
-    }
-
-    // Read existing data
-    const existingData = this.readPriceData();
-
-    // Append new prices
-    existingData.prices.push(...newPrices);
-    existingData.lastUpdated = new Date().toISOString();
-    existingData.totalEntries = existingData.prices.length;
-    
-    // Update symbols list (add new ones if not present)
-    symbols.forEach(symbol => {
-      if (!existingData.symbols.includes(symbol.toUpperCase())) {
-        existingData.symbols.push(symbol.toUpperCase());
-      }
-    });
-
-    // Write back to file
-    this.writePriceData(existingData);
-
-    // Display what we just logged
-    console.log('\n📊 LOGGED PRICES:');
-    newPrices.forEach(price => {
-      const changeColor = (price.change24h || 0) >= 0 ? '🟢' : '🔴';
-      console.log(
-        `${changeColor} ${price.symbol}: $${price.price.toFixed(4)} ` +
-        `(${price.change24h?.toFixed(2) || 'N/A'}% 24h) ` +
-        `at ${price.datetime.split('T')[1].split('.')[0]}`
-      );
-    });
-
-    console.log(`\n💾 Total entries in file: ${existingData.totalEntries}`);
-  }
-
-  // Get price history for a specific symbol
-  getPriceHistory(symbol: string, limit?: number): PriceData[] {
-    const data = this.readPriceData();
-    const symbolPrices = data.prices
-      .filter(p => p.symbol.toUpperCase() === symbol.toUpperCase())
-      .sort((a, b) => parseInt(b.timestamp) - parseInt(a.timestamp)); // Most recent first
-
-    return limit ? symbolPrices.slice(0, limit) : symbolPrices;
-  }
-
-  // Get latest prices for all symbols
-  getLatestPrices(): { [symbol: string]: PriceData } {
-    const data = this.readPriceData();
-    const latest: { [symbol: string]: PriceData } = {};
-
-    // Group by symbol and get the most recent entry for each
-    data.prices.forEach(price => {
-      if (!latest[price.symbol] || 
-          parseInt(price.timestamp) > parseInt(latest[price.symbol].timestamp)) {
-        latest[price.symbol] = price;
-      }
-    });
-
-    return latest;
-  }
-
-  // Display statistics about stored data
-  displayStats(): void {
-    const data = this.readPriceData();
-    
-    console.log('\n📈 PRICE DATA STATISTICS');
-    console.log('========================');
-    console.log(`File: ${this.filePath}`);
-    console.log(`Last Updated: ${data.lastUpdated}`);
-    console.log(`Total Entries: ${data.totalEntries}`);
-    console.log(`Tracked Symbols: ${data.symbols.join(', ')}`);
-    
-    if (data.prices.length > 0) {
-      const oldest = new Date(Math.min(...data.prices.map(p => parseInt(p.timestamp))));
-      const newest = new Date(Math.max(...data.prices.map(p => parseInt(p.timestamp))));
-      
-      console.log(`First Entry: ${oldest.toISOString()}`);
-      console.log(`Latest Entry: ${newest.toISOString()}`);
-      
-      // Count entries per symbol
-      const symbolCounts: { [key: string]: number } = {};
-      data.prices.forEach(p => {
-        symbolCounts[p.symbol] = (symbolCounts[p.symbol] || 0) + 1;
-      });
-      
-      console.log('\nEntries per symbol:');
-      Object.entries(symbolCounts)
-        .sort(([,a], [,b]) => b - a)
-        .forEach(([symbol, count]) => {
-          console.log(`  ${symbol}: ${count} entries`);
-        });
-    }
-  }
-
-  // Clean old entries (keep only last N entries per symbol)
-  cleanOldEntries(keepPerSymbol: number = 100): void {
-    const data = this.readPriceData();
-    const cleanedPrices: PriceData[] = [];
-
-    // Group by symbol
-    const bySymbol: { [key: string]: PriceData[] } = {};
-    data.prices.forEach(price => {
-      if (!bySymbol[price.symbol]) bySymbol[price.symbol] = [];
-      bySymbol[price.symbol].push(price);
-    });
-
-    // Keep only the most recent entries for each symbol
-    Object.values(bySymbol).forEach(symbolPrices => {
-      const sorted = symbolPrices.sort((a, b) => parseInt(b.timestamp) - parseInt(a.timestamp));
-      cleanedPrices.push(...sorted.slice(0, keepPerSymbol));
-    });
-
-    const originalCount = data.prices.length;
-    data.prices = cleanedPrices;
-    data.totalEntries = cleanedPrices.length;
-    data.lastUpdated = new Date().toISOString();
-
-    this.writePriceData(data);
-    
-    console.log(`🧹 Cleaned ${originalCount - cleanedPrices.length} old entries. Kept ${cleanedPrices.length} entries.`);
   }
 }
 
-// Usage examples
-async function main() {
-  // Create logger instance
-  // Use CoinGecko (free, no API key needed)
-  const logger = new CryptoPriceLogger('./prices.json', undefined, true);
-  
-  // Or use CoinMarketCap (requires API key)
-  // const logger = new CryptoPriceLogger('./prices.json', 'YOUR_CMC_API_KEY', false);
-
-  const symbols = ['bitcoin', 'ethereum', 'cardano', 'polkadot', 'chainlink'];
+// Usage examples with free tier
+async function exampleUsage() {
+  // Replace with your actual API key from coinmarketcap.com/api
+  const API_KEY = '4678cde0-6535-4038-850c-9da1fab2e8c3';
+  const cmc = new CoinMarketCapFreeAPI(API_KEY);
 
   try {
-    // Log current prices
-    await logger.logPrices(symbols);
+    console.log('🚀 Testing CoinMarketCap Free API...\n');
 
-    // Display statistics
-    logger.displayStats();
+    // Check API key info
+    console.log('📋 Checking API key info...');
+    const keyInfo = await cmc.getKeyInfo();
+    console.log(`Plan: ${keyInfo.data.plan.name}`);
+    console.log(`Credits per month: ${keyInfo.data.plan.credit_limit_monthly}`);
+    console.log(`Credits per day: ${keyInfo.data.plan.credit_limit_daily}`);
 
-    // Show latest prices
-    console.log('\n💰 LATEST PRICES:');
-    const latest = logger.getLatestPrices();
-    Object.values(latest).forEach(price => {
-      console.log(`${price.symbol}: $${price.price.toFixed(4)} (${price.datetime})`);
-    });
+    // Get top 20 cryptocurrencies
+    console.log('\n📈 Fetching top 20 cryptocurrencies...');
+    const topCryptos = await cmc.getLatestListings(1, 20);
+    CoinMarketCapFreeAPI.formatCryptoData(topCryptos.data);
+
+    // Quick price check for specific coins
+    console.log('\n🎯 Checking specific cryptocurrency prices...');
+    await cmc.quickPriceCheck(['BTC', 'ETH', 'BNB', 'ADA', 'SOL']);
+
+    // Get global market metrics
+    console.log('\n🌍 Global market metrics...');
+    const globalData = await cmc.getGlobalMetrics();
+    const globalQuote = globalData.data.quote.USD;
+    
+    console.log(`Total Market Cap: $${(globalQuote.total_market_cap / 1e12).toFixed(2)}T`);
+    console.log(`24h Volume: $${(globalQuote.total_volume_24h / 1e9).toFixed(2)}B`);
+    console.log(`BTC Dominance: ${globalData.data.btc_dominance.toFixed(2)}%`);
+    console.log(`Active Cryptocurrencies: ${globalData.data.active_cryptocurrencies.toLocaleString()}`);
+
+    // Show usage statistics
+    const usage = cmc.getUsageStats();
+    console.log(`\n📊 API Usage: ${usage.callsUsed}/${10000} (${usage.usagePercentage.toFixed(2)}%)`);
 
   } catch (error) {
     console.error('❌ Error:', error);
   }
 }
 
-// Continuous price monitoring
-async function startMonitoring(intervalMinutes: number = 5) {
-  const logger = new CryptoPriceLogger('./prices.json');
-  const symbols = ['bitcoin', 'ethereum', 'cardano', 'polkadot', 'solana'];
+// Lightweight price tracking function
+async function trackPrices(apiKey: string, symbols: string[], intervalMinutes: number = 5) {
+  const cmc = new CoinMarketCapFreeAPI(apiKey);
+  
+  console.log(`🔄 Starting price tracking for: ${symbols.join(', ')}`);
+  console.log(`⏰ Update interval: ${intervalMinutes} minutes\n`);
 
-  console.log(`🚀 Starting price monitoring every ${intervalMinutes} minutes...`);
-  console.log(`📁 Saving to: ${path.resolve('./prices.json')}\n`);
-
-  // Log prices immediately
-  await logger.logPrices(symbols);
-
-  // Set up interval for continuous monitoring
-  setInterval(async () => {
+  const track = async () => {
     try {
-      await logger.logPrices(symbols);
+      await cmc.quickPriceCheck(symbols);
+      const usage = cmc.getUsageStats();
+      console.log(`📊 API calls used: ${usage.callsUsed}/${usage.callsUsed + usage.callsRemaining}\n`);
     } catch (error) {
-      console.error('❌ Monitoring error:', error);
+      console.error('❌ Tracking error:', error);
     }
-  }, intervalMinutes * 60 * 1000);
+  };
+
+  // Initial check
+  await track();
+
+  // Set interval for continuous tracking
+  setInterval(track, intervalMinutes * 60 * 1000);
 }
 
 // Export for use in other modules
-export { CryptoPriceLogger, PriceData, StoredPrices };
+export { CoinMarketCapFreeAPI, CMCCryptocurrency, CMCQuote, CMCResponse };
 
-// Run if this file is executed directly
+// Run example if executed directly
 if (require.main === module) {
-  // Choose what to run:
-  main(); // Single run
-  // startMonitoring(5); // Continuous monitoring every 5 minutes
+  exampleUsage();
 }
