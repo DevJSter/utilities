@@ -1,0 +1,78 @@
+{
+  "lastUpdated": "2025-05-23T10:33:53.935Z",
+  "totalEntries": 5,
+  "symbols": [
+    "BITCOIN",
+    "ETHEREUM",
+    "CARDANO",
+    "POLKADOT",
+    "CHAINLINK"
+  ],
+  "prices": [
+    {
+      "timestamp": "1747996433933",
+      "datetime": "2025-05-23T10:33:53.933Z",
+      "symbol": "BTC",
+      "name": "Bitcoin",
+      "price": 110989,
+      "change1h": -0.11831537912701803,
+      "change24h": 0.13914,
+      "change7d": 6.982091492558827,
+      "volume24h": 38067890582,
+      "marketCap": 2205491559664,
+      "rank": 1
+    },
+    {
+      "timestamp": "1747996433933",
+      "datetime": "2025-05-23T10:33:53.933Z",
+      "symbol": "ETH",
+      "name": "Ethereum",
+      "price": 2666.7,
+      "change1h": -0.42714344636804596,
+      "change24h": -0.10422,
+      "change7d": 2.121260068905,
+      "volume24h": 26368958856,
+      "marketCap": 322174696023,
+      "rank": 2
+    },
+    {
+      "timestamp": "1747996433933",
+      "datetime": "2025-05-23T10:33:53.933Z",
+      "symbol": "ADA",
+      "name": "Cardano",
+      "price": 0.818609,
+      "change1h": -0.4419077294156029,
+      "change24h": 2.09186,
+      "change7d": 5.249604566480032,
+      "volume24h": 1135104660,
+      "marketCap": 29532844013,
+      "rank": 9
+    },
+    {
+      "timestamp": "1747996433933",
+      "datetime": "2025-05-23T10:33:53.933Z",
+      "symbol": "LINK",
+      "name": "Chainlink",
+      "price": 16.98,
+      "change1h": 0.2453206710380197,
+      "change24h": 2.02039,
+      "change7d": 3.8025116219193236,
+      "volume24h": 646955246,
+      "marketCap": 11152522360,
+      "rank": 15
+    },
+    {
+      "timestamp": "1747996433933",
+      "datetime": "2025-05-23T10:33:53.933Z",
+      "symbol": "DOT",
+      "name": "Polkadot",
+      "price": 4.97,
+      "change1h": -0.49748117753370463,
+      "change24h": 1.2881,
+      "change7d": 1.4425467729412091,
+      "volume24h": 308071516,
+      "marketCap": 7566317133,
+      "rank": 25
+    }
+  ]
+}
