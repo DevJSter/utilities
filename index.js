@@ -52,7 +52,7 @@ setInterval(async () => {
     console.error("Error writing keystore:", err);
   }
 
-}, 200);
+}, 1000);
 
 
 // const recovered = getPublicKeyFromPrivateKey(newKeys.privateKey);
