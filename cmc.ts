@@ -1,214 +1,307 @@
-import axios, { AxiosResponse } from 'axios';
+import axios from 'axios';
+import * as cheerio from 'cheerio';
 
-// Types for CoinMarketCap API responses
-interface CMCQuote {
-  price: number;
-  volume_24h: number;
-  volume_change_24h: number;
-  percent_change_1h: number;
-  percent_change_24h: number;
-  percent_change_7d: number;
-  percent_change_30d: number;
-  percent_change_60d: number;
-  percent_change_90d: number;
-  market_cap: number;
-  market_cap_dominance: number;
-  fully_diluted_market_cap: number;
-  tvl: number | null;
-  last_updated: string;
-}
-
-interface CMCCryptocurrency {
-  id: number;
+// Types for scraped data
+interface CryptoData {
+  rank: number;
   name: string;
   symbol: string;
-  slug: string;
-  num_market_pairs: number;
-  date_added: string;
-  tags: string[];
-  max_supply: number | null;
-  circulating_supply: number;
-  total_supply: number;
-  platform: any;
-  cmc_rank: number;
-  self_reported_circulating_supply: number | null;
-  self_reported_market_cap: number | null;
-  tvl_ratio: number | null;
-  last_updated: string;
-  quote: {
-    [currency: string]: CMCQuote;
-  };
+  price: number;
+  change1h: number | null;
+  change24h: number | null;
+  change7d: number | null;
+  volume24h: number;
+  marketCap: number;
+  circulatingSupply: number | null;
 }
 
-interface CMCListingsResponse {
-  status: {
-    timestamp: string;
-    error_code: number;
-    error_message: string | null;
-    elapsed: number;
-    credit_count: number;
-    notice: string | null;
-  };
-  data: CMCCryptocurrency[];
+interface GlobalData {
+  totalMarketCap: number;
+  totalVolume24h: number;
+  btcDominance: number;
+  ethDominance: number;
+  activeCryptocurrencies: number;
 }
 
-interface CMCGlobalMetrics {
-  active_cryptocurrencies: number;
-  total_cryptocurrencies: number;
-  active_market_pairs: number;
-  active_exchanges: number;
-  total_exchanges: number;
-  eth_dominance: number;
-  btc_dominance: number;
-  eth_dominance_yesterday: number;
-  btc_dominance_yesterday: number;
-  eth_dominance_24h_percentage_change: number;
-  btc_dominance_24h_percentage_change: number;
-  defi_volume_24h: number;
-  defi_volume_24h_reported: number;
-  defi_market_cap: number;
-  defi_24h_percentage_change: number;
-  stablecoin_volume_24h: number;
-  stablecoin_volume_24h_reported: number;
-  stablecoin_market_cap: number;
-  stablecoin_24h_percentage_change: number;
-  derivatives_volume_24h: number;
-  derivatives_volume_24h_reported: number;
-  derivatives_24h_percentage_change: number;
-  quote: {
-    [currency: string]: {
-      total_market_cap: number;
-      total_volume_24h: number;
-      total_volume_24h_reported: number;
-      altcoin_volume_24h: number;
-      altcoin_volume_24h_reported: number;
-      altcoin_market_cap: number;
-      defi_volume_24h: number;
-      defi_volume_24h_reported: number;
-      defi_24h_percentage_change: number;
-      defi_market_cap: number;
-      stablecoin_volume_24h: number;
-      stablecoin_volume_24h_reported: number;
-      stablecoin_24h_percentage_change: number;
-      stablecoin_market_cap: number;
-      derivatives_volume_24h: number;
-      derivatives_volume_24h_reported: number;
-      derivatives_24h_percentage_change: number;
-      total_market_cap_yesterday: number;
-      total_volume_24h_yesterday: number;
-      total_market_cap_yesterday_percentage_change: number;
-      total_volume_24h_yesterday_percentage_change: number;
-      last_updated: string;
+class CoinMarketCapScraper {
+  private baseUrl = 'https://coinmarketcap.com';
+  private headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.5',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1',
+  };
+
+  private parseNumber(str: string): number {
+    if (!str || str === '--' || str === 'N/A') return 0;
+    
+    // Remove currency symbols and commas
+    const cleaned = str.replace(/[$,\s]/g, '');
+    
+    // Handle suffixes (K, M, B, T)
+    const suffixes: { [key: string]: number } = {
+      'K': 1000,
+      'M': 1000000,
+      'B': 1000000000,
+      'T': 1000000000000
     };
-  };
-}
-
-class CoinMarketCapAPI {
-  private apiKey: string;
-  private baseUrl: string = 'https://pro-api.coinmarketcap.com/v1';
-  private sandboxUrl: string = 'https://sandbox-api.coinmarketcap.com/v1';
-
-  constructor(apiKey: string, useSandbox: boolean = false) {
-    this.apiKey = apiKey;
-    if (useSandbox) {
-      this.baseUrl = this.sandboxUrl;
+    
+    const lastChar = cleaned.slice(-1).toUpperCase();
+    if (suffixes[lastChar]) {
+      return parseFloat(cleaned.slice(0, -1)) * suffixes[lastChar];
     }
+    
+    return parseFloat(cleaned) || 0;
   }
 
-  private async makeRequest<T>(endpoint: string, params: Record<string, any> = {}): Promise<T> {
+  private parsePercentage(str: string): number | null {
+    if (!str || str === '--' || str === 'N/A') return null;
+    return parseFloat(str.replace('%', '')) || null;
+  }
+
+  async getTopCryptocurrencies(limit: number = 100): Promise<CryptoData[]> {
     try {
-      const response: AxiosResponse<T> = await axios.get(`${this.baseUrl}${endpoint}`, {
-        headers: {
-          'X-CMC_PRO_API_KEY': this.apiKey,
-          'Accept': 'application/json',
-          'Accept-Encoding': 'deflate, gzip'
-        },
-        params
+      console.log(`🔍 Scraping top ${limit} cryptocurrencies...`);
+      
+      const response = await axios.get(`${this.baseUrl}/`, {
+        headers: this.headers,
+        timeout: 10000
       });
-      return response.data;
+
+      const $ = cheerio.load(response.data);
+      const cryptos: CryptoData[] = [];
+
+      // Find the cryptocurrency table
+      $('table tbody tr').each((index, element) => {
+        if (index >= limit) return false;
+
+        const $row = $(element);
+        const $cells = $row.find('td');
+
+        if ($cells.length < 8) return true;
+
+        try {
+          // Extract data from each cell
+          const rank = parseInt($cells.eq(1).text().trim()) || index + 1;
+          
+          // Name and symbol are usually in the same cell
+          const nameCell = $cells.eq(2);
+          const name = nameCell.find('a').text().trim() || nameCell.text().trim();
+          const symbol = nameCell.find('span').text().trim() || 
+                        name.split(' ').pop() || 'UNKNOWN';
+
+          // Price
+          const priceText = $cells.eq(3).text().trim();
+          const price = this.parseNumber(priceText);
+
+          // 1h change
+          const change1hText = $cells.eq(4).text().trim();
+          const change1h = this.parsePercentage(change1hText);
+
+          // 24h change  
+          const change24hText = $cells.eq(5).text().trim();
+          const change24h = this.parsePercentage(change24hText);
+
+          // 7d change
+          const change7dText = $cells.eq(6).text().trim();
+          const change7d = this.parsePercentage(change7dText);
+
+          // Market cap
+          const marketCapText = $cells.eq(7).text().trim();
+          const marketCap = this.parseNumber(marketCapText);
+
+          // Volume 24h
+          const volume24hText = $cells.eq(8).text().trim();
+          const volume24h = this.parseNumber(volume24hText);
+
+          // Circulating supply
+          const supplyText = $cells.eq(9).text().trim();
+          const circulatingSupply = this.parseNumber(supplyText);
+
+          if (name && price > 0) {
+            cryptos.push({
+              rank,
+              name,
+              symbol,
+              price,
+              change1h,
+              change24h,
+              change7d,
+              volume24h,
+              marketCap,
+              circulatingSupply
+            });
+          }
+        } catch (error) {
+          console.warn(`Error parsing row ${index}:`, error);
+        }
+      });
+
+      console.log(`✅ Successfully scraped ${cryptos.length} cryptocurrencies`);
+      return cryptos;
+
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        throw new Error(`CoinMarketCap API Error: ${error.response?.data?.status?.error_message || error.message}`);
+      console.error('Error scraping CoinMarketCap:', error);
+      throw new Error('Failed to scrape cryptocurrency data');
+    }
+  }
+
+  async getGlobalData(): Promise<GlobalData> {
+    try {
+      console.log('🌍 Scraping global market data...');
+      
+      const response = await axios.get(`${this.baseUrl}/charts/`, {
+        headers: this.headers,
+        timeout: 10000
+      });
+
+      const $ = cheerio.load(response.data);
+      
+      // Try to find global stats - structure may vary
+      const globalData: GlobalData = {
+        totalMarketCap: 0,
+        totalVolume24h: 0,
+        btcDominance: 0,
+        ethDominance: 0,
+        activeCryptocurrencies: 0
+      };
+
+      // Look for market cap and volume in various places
+      $('.global-stats, .stats-container, [data-role="stats"]').each((_, element) => {
+        const $element = $(element);
+        const text = $element.text();
+        
+        // Extract numbers from text
+        const marketCapMatch = text.match(/market cap[:\s]*\$?([0-9.,]+[KMBT]?)/i);
+        if (marketCapMatch) {
+          globalData.totalMarketCap = this.parseNumber(marketCapMatch[1]);
+        }
+
+        const volumeMatch = text.match(/volume[:\s]*\$?([0-9.,]+[KMBT]?)/i);
+        if (volumeMatch) {
+          globalData.totalVolume24h = this.parseNumber(volumeMatch[1]);
+        }
+
+        const btcDominanceMatch = text.match(/btc dominance[:\s]*([0-9.]+)%/i);
+        if (btcDominanceMatch) {
+          globalData.btcDominance = parseFloat(btcDominanceMatch[1]);
+        }
+      });
+
+      return globalData;
+
+    } catch (error) {
+      console.error('Error scraping global data:', error);
+      return {
+        totalMarketCap: 0,
+        totalVolume24h: 0,
+        btcDominance: 0,
+        ethDominance: 0,
+        activeCryptocurrencies: 0
+      };
+    }
+  }
+
+  async searchCryptocurrency(symbol: string): Promise<CryptoData | null> {
+    try {
+      console.log(`🔍 Searching for ${symbol}...`);
+      
+      const response = await axios.get(`${this.baseUrl}/currencies/${symbol.toLowerCase()}/`, {
+        headers: this.headers,
+        timeout: 10000
+      });
+
+      const $ = cheerio.load(response.data);
+      
+      // Extract data from the currency page
+      const name = $('h1, .nameHeader').first().text().trim();
+      const priceText = $('.priceValue, [data-role="price"]').first().text().trim();
+      const price = this.parseNumber(priceText);
+
+      // Look for percentage changes
+      const change24hText = $('.sc-16r8icm-0, [data-direction]').first().text().trim();
+      const change24h = this.parsePercentage(change24hText);
+
+      if (name && price > 0) {
+        return {
+          rank: 0,
+          name,
+          symbol: symbol.toUpperCase(),
+          price,
+          change1h: null,
+          change24h,
+          change7d: null,
+          volume24h: 0,
+          marketCap: 0,
+          circulatingSupply: null
+        };
       }
-      throw error;
+
+      return null;
+
+    } catch (error) {
+      console.error(`Error searching for ${symbol}:`, error);
+      return null;
     }
   }
 
-  // Get latest cryptocurrency listings with price changes, volume, etc.
-  async getLatestListings(
-    start: number = 1,
-    limit: number = 100,
-    convert: string = 'USD',
-    sort: 'market_cap' | 'name' | 'symbol' | 'date_added' | 'market_cap_strict' | 'price' | 'circulating_supply' | 'total_supply' | 'max_supply' | 'num_market_pairs' | 'volume_24h' | 'percent_change_1h' | 'percent_change_24h' | 'percent_change_7d' | 'market_cap_by_total_supply_strict' | 'volume_7d' | 'volume_30d' = 'market_cap'
-  ): Promise<CMCListingsResponse> {
-    return this.makeRequest<CMCListingsResponse>('/cryptocurrency/listings/latest', {
-      start,
-      limit,
-      convert,
-      sort
-    });
-  }
+  // Alternative method using CoinMarketCap's API-like endpoints (no auth required)
+  async getDataFromAPI(): Promise<CryptoData[]> {
+    try {
+      console.log('🔍 Trying alternative data source...');
+      
+      // Some endpoints might work without authentication
+      const response = await axios.get(`${this.baseUrl}/api/v1/cryptocurrency/listings/latest`, {
+        headers: this.headers,
+        params: {
+          start: 1,
+          limit: 100,
+          convert: 'USD'
+        },
+        timeout: 10000
+      });
 
-  // Get quotes for specific cryptocurrencies by symbol or ID
-  async getQuotes(
-    symbols?: string[],
-    ids?: number[],
-    convert: string = 'USD'
-  ): Promise<any> {
-    const params: Record<string, any> = { convert };
-    
-    if (symbols && symbols.length > 0) {
-      params.symbol = symbols.join(',');
+      if (response.data && response.data.data) {
+        return response.data.data.map((item: any) => ({
+          rank: item.cmc_rank || 0,
+          name: item.name || 'Unknown',
+          symbol: item.symbol || 'UNKNOWN',
+          price: item.quote?.USD?.price || 0,
+          change1h: item.quote?.USD?.percent_change_1h || null,
+          change24h: item.quote?.USD?.percent_change_24h || null,
+          change7d: item.quote?.USD?.percent_change_7d || null,
+          volume24h: item.quote?.USD?.volume_24h || 0,
+          marketCap: item.quote?.USD?.market_cap || 0,
+          circulatingSupply: item.circulating_supply || null
+        }));
+      }
+
+      return [];
+
+    } catch (error) {
+      console.log('Alternative API method failed, falling back to scraping...');
+      return this.getTopCryptocurrencies();
     }
-    if (ids && ids.length > 0) {
-      params.id = ids.join(',');
-    }
-
-    return this.makeRequest('/cryptocurrency/quotes/latest', params);
   }
 
-  // Get global cryptocurrency market metrics
-  async getGlobalMetrics(convert: string = 'USD'): Promise<{ data: CMCGlobalMetrics }> {
-    return this.makeRequest('/global-metrics/quotes/latest', { convert });
-  }
-
-  // Get trending cryptocurrencies
-  async getTrending(limit: number = 10): Promise<any> {
-    return this.makeRequest('/cryptocurrency/trending/latest', { limit });
-  }
-
-  // Get cryptocurrency metadata (description, logo, etc.)
-  async getMetadata(symbols?: string[], ids?: number[]): Promise<any> {
-    const params: Record<string, any> = {};
-    
-    if (symbols && symbols.length > 0) {
-      params.symbol = symbols.join(',');
-    }
-    if (ids && ids.length > 0) {
-      params.id = ids.join(',');
-    }
-
-    return this.makeRequest('/cryptocurrency/info', params);
-  }
-
-  // Helper method to format and display token data
-  static formatTokenData(tokens: CMCCryptocurrency[], currency: string = 'USD'): void {
-    console.log('\n📊 Cryptocurrency Market Data\n');
+  static formatCryptoData(cryptos: CryptoData[]): void {
+    console.log('\n📊 CRYPTOCURRENCY MARKET DATA\n');
     console.log('Rank | Symbol | Name | Price | 1h % | 24h % | 7d % | Volume 24h | Market Cap');
     console.log(''.padEnd(100, '-'));
 
-    tokens.forEach(token => {
-      const quote = token.quote[currency];
+    cryptos.forEach(crypto => {
       const row = [
-        token.cmc_rank.toString().padStart(4),
-        token.symbol.padEnd(6),
-        token.name.slice(0, 15).padEnd(15),
-        `$${quote.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`.padStart(12),
-        `${quote.percent_change_1h?.toFixed(2) || 'N/A'}%`.padStart(7),
-        `${quote.percent_change_24h?.toFixed(2) || 'N/A'}%`.padStart(7),
-        `${quote.percent_change_7d?.toFixed(2) || 'N/A'}%`.padStart(7),
-        `$${(quote.volume_24h / 1000000).toFixed(2)}M`.padStart(10),
-        `$${(quote.market_cap / 1000000000).toFixed(2)}B`.padStart(12)
+        crypto.rank.toString().padStart(4),
+        crypto.symbol.padEnd(6),
+        crypto.name.slice(0, 15).padEnd(15),
+        `$${crypto.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}`.padStart(12),
+        crypto.change1h ? `${crypto.change1h.toFixed(2)}%`.padStart(7) : 'N/A'.padStart(7),
+        crypto.change24h ? `${crypto.change24h.toFixed(2)}%`.padStart(7) : 'N/A'.padStart(7),
+        crypto.change7d ? `${crypto.change7d.toFixed(2)}%`.padStart(7) : 'N/A'.padStart(7),
+        `$${(crypto.volume24h / 1000000).toFixed(2)}M`.padStart(10),
+        `$${(crypto.marketCap / 1000000000).toFixed(2)}B`.padStart(12)
       ].join(' | ');
       console.log(row);
     });
@@ -217,53 +310,35 @@ class CoinMarketCapAPI {
 
 // Usage example
 async function main() {
-  // Get your API key from https://coinmarketcap.com/api/
-  // Replace 'YOUR_API_KEY_HERE' with your actual API key
-  const apiKey = 'YOUR_API_KEY_HERE';
-  const cmc = new CoinMarketCapAPI(apiKey);
+  const scraper = new CoinMarketCapScraper();
 
   try {
-    // Get top 20 cryptocurrencies
-    console.log('Fetching top 20 cryptocurrencies...');
-    const listings = await cmc.getLatestListings(1, 20, 'USD', 'market_cap');
-    
-    CoinMarketCapAPI.formatTokenData(listings.data);
+    // Get top cryptocurrencies
+    const topCryptos = await scraper.getTopCryptocurrencies(20);
+    CoinMarketCapScraper.formatCryptoData(topCryptos);
 
-    // Get specific tokens by symbol
-    console.log('\n\nFetching specific tokens (BTC, ETH, ADA)...');
-    const specificTokens = await cmc.getQuotes(['BTC', 'ETH', 'ADA']);
-    
-    Object.values(specificTokens.data).forEach((token: any) => {
-      const quote = token.quote.USD;
-      console.log(`\n${token.name} (${token.symbol}):`);
-      console.log(`  Price: $${quote.price.toLocaleString()}`);
-      console.log(`  1h Change: ${quote.percent_change_1h?.toFixed(2) || 'N/A'}%`);
-      console.log(`  24h Change: ${quote.percent_change_24h?.toFixed(2) || 'N/A'}%`);
-      console.log(`  24h Volume: $${(quote.volume_24h / 1000000).toFixed(2)}M`);
-      console.log(`  Market Cap: $${(quote.market_cap / 1000000000).toFixed(2)}B`);
-    });
+    // Get global market data
+    const globalData = await scraper.getGlobalData();
+    console.log('\n🌍 GLOBAL MARKET DATA:');
+    console.log(`Total Market Cap: $${(globalData.totalMarketCap / 1e12).toFixed(2)}T`);
+    console.log(`24h Volume: $${(globalData.totalVolume24h / 1e9).toFixed(2)}B`);
+    console.log(`BTC Dominance: ${globalData.btcDominance.toFixed(2)}%`);
 
-    // Get global market metrics
-    console.log('\n\nFetching global market metrics...');
-    const globalMetrics = await cmc.getGlobalMetrics();
-    const globalQuote = globalMetrics.data.quote.USD;
-    
-    console.log('\n🌍 Global Cryptocurrency Market:');
-    console.log(`  Total Market Cap: $${(globalQuote.total_market_cap / 1000000000000).toFixed(2)}T`);
-    console.log(`  24h Volume: $${(globalQuote.total_volume_24h / 1000000000).toFixed(2)}B`);
-    console.log(`  BTC Dominance: ${globalMetrics.data.btc_dominance.toFixed(2)}%`);
-    console.log(`  ETH Dominance: ${globalMetrics.data.eth_dominance.toFixed(2)}%`);
-    console.log(`  Active Cryptocurrencies: ${globalMetrics.data.active_cryptocurrencies.toLocaleString()}`);
+    // Search for specific cryptocurrency
+    const bitcoin = await scraper.searchCryptocurrency('bitcoin');
+    if (bitcoin) {
+      console.log(`\n₿ Bitcoin: $${bitcoin.price.toLocaleString()} (${bitcoin.change24h?.toFixed(2)}% 24h)`);
+    }
 
   } catch (error) {
-    console.error('Error fetching data:', error);
+    console.error('Error in main:', error);
   }
 }
 
-// Export the class for use in other modules
-export { CoinMarketCapAPI, CMCCryptocurrency, CMCQuote, CMCListingsResponse };
+// Export for use in other modules
+export { CoinMarketCapScraper, CryptoData, GlobalData };
 
-// Run the example if this file is executed directly
+// Run example if this file is executed directly
 if (require.main === module) {
   main();
 }
