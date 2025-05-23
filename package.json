@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/cmc.js",
-    "dev": "ts-node src/cmc.ts",
+    "dev": "ts-node cmc.ts",
     "watch": "tsc -w"
   },
   "dependencies": {
