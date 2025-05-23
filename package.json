@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "description": "TypeScript client for CoinMarketCap API",
   "scripts": {
-    "build": "tsc",
-    "start": "node dist/cmc.js",
-    "dev": "ts-node cmc.ts",
-    "watch": "tsc -w"
-  },
+  "build": "tsc",
+  "start": "node dist/cmc.js",
+  "dev": "node --loader ts-node/esm cmc.ts",
+  "watch": "tsc -w"
+},
   "dependencies": {
     "axios": "^1.9.0",
     "base-64": "^1.0.0",
