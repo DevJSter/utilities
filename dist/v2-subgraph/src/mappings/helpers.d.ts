@@ -1,0 +1,22 @@
+import { Address, BigDecimal, BigInt } from '@graphprotocol/graph-ts';
+export declare const ADDRESS_ZERO = "0x0000000000000000000000000000000000000000";
+export declare const FACTORY_ADDRESS = "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f";
+export declare let ZERO_BI: any;
+export declare let ONE_BI: any;
+export declare let ZERO_BD: any;
+export declare let ONE_BD: any;
+export declare let BI_18: any;
+export declare let factoryContract: any;
+export declare let UNTRACKED_PAIRS: string[];
+export declare function exponentToBigDecimal(decimals: BigInt): BigDecimal;
+export declare function bigDecimalExp18(): BigDecimal;
+export declare function convertEthToDecimal(eth: BigInt): BigDecimal;
+export declare function convertTokenToDecimal(tokenAmount: BigInt, exchangeDecimals: BigInt): BigDecimal;
+export declare function equalToZero(value: BigDecimal): boolean;
+export declare function isNullEthValue(value: string): boolean;
+export declare function fetchTokenSymbol(tokenAddress: Address): string;
+export declare function fetchTokenName(tokenAddress: Address): string;
+export declare function fetchTokenTotalSupply(tokenAddress: Address): BigInt;
+export declare function fetchTokenDecimals(tokenAddress: Address): BigInt | null;
+export declare function createUser(address: Address): void;
+//# sourceMappingURL=helpers.d.ts.map
