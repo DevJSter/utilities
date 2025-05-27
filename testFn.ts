@@ -1,10 +1,8 @@
-// Import polyfills first for React Native
-import 'react-native-get-random-values';
+const nacl = require('tweetnacl');
+const { sha256 } = require('@noble/hashes/sha256');
+const { utf8ToBytes } = require('@noble/hashes/utils');
+const { wordlist } = require('@scure/bip39/wordlists/english');
 
-import nacl from 'tweetnacl';
-import { sha256 } from '@noble/hashes/sha256';
-import { utf8ToBytes } from '@noble/hashes/utils';
-import { wordlist } from '@scure/bip39/wordlists/english';
 
 // ✅ Type definitions
 export interface KeyPair {
@@ -101,4 +99,4 @@ export const testKeyUtils = (): void => {
 };
 
 // 🔥 Uncomment to test locally
-// testKeyUtils();
+testKeyUtils();
