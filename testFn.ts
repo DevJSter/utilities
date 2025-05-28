@@ -98,5 +98,71 @@ export const testKeyUtils = (): void => {
   }
 };
 
+/**
+ * Given a private key hex (64 bytes), return the KeyPair (public + private)
+ * This doesn't recover the seedphrase (not possible), only keys
+ */
+export const getKeypairFromPrivateKey = (privateKeyHex: string): KeyPair | null => {
+  try {
+    const secretKey = Buffer.from(privateKeyHex.slice(2), 'hex');
+    if (secretKey.length !== 64) {
+      throw new Error('Invalid secretKey length (expected 64 bytes)');
+    }
+
+    const publicKey = secretKey.slice(32, 64);
+    const publicKeyHex = '0x' + publicKey.toString('hex');
+    const privateKeyHexNormalized = '0x' + secretKey.toString('hex');
+
+    return {
+      publicKey: publicKeyHex,
+      privateKey: privateKeyHexNormalized,
+    };
+  } catch (error) {
+    console.error('Invalid Private Key:', error);
+    return null;
+  }
+};
+
+/**
+ * Given a seedphrase (6-word mnemonic), returns it (could add validation if desired)
+ */
+export const getSeedphraseFromSeedphrase = (seedphrase: string): string => {
+  // Optionally add validation here if desired
+  return seedphrase.trim();
+};
+
+/**
+ * Test function for new methods
+ */
+export const testNewFunctions = (): void => {
+  const mnemonic = generate6WordMnemonic();
+  console.log('Generated mnemonic:', mnemonic);
+
+  try {
+    // From seedphrase get keypair
+    const keypair = getPublicKeyPrivateKeyFromSeedphrase(mnemonic);
+    console.log('Derived from seedphrase - Public Key:', keypair.publicKey);
+    console.log('Derived from seedphrase - Private Key:', keypair.privateKey);
+
+    // From private key recover keypair
+    const recoveredKeypair = getKeypairFromPrivateKey(keypair.privateKey);
+    console.log('Recovered from private key - Public Key:', recoveredKeypair?.publicKey);
+    console.log('Recovered from private key - Private Key:', recoveredKeypair?.privateKey);
+
+    // Confirm keys match
+    console.log('Keys match:', recoveredKeypair?.publicKey === keypair.publicKey && recoveredKeypair?.privateKey === keypair.privateKey);
+
+    // Return seedphrase unchanged
+    const recoveredSeedphrase = getSeedphraseFromSeedphrase(mnemonic);
+    console.log('Recovered Seedphrase:', recoveredSeedphrase);
+  } catch (e: any) {
+    console.error('Error in testNewFunctions:', e.message);
+  }
+};
+
+// 🔥 Uncomment to test
+testNewFunctions();
+
+
 // 🔥 Uncomment to test locally
-testKeyUtils();
+// testKeyUtils();
