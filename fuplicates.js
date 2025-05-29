@@ -1,7 +1,7 @@
 import fs from 'fs';
 
 function overwriteWithUniqueWords() {
-  const filePath = 'safe.txt';
+  const filePath = 'wordlist.txt';
 while (true) {
   if (!fs.existsSync(filePath)) {
     console.error(`❌ File not found: ${filePath}`);
